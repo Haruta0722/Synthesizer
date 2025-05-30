@@ -7,7 +7,8 @@ class SynthState:
             0, 150, 150, 200,  # wave, attack, release, LPF_cutoff
             0, 0,              # FM_amp, FM_freq
             1, 0,              # Unison, Detune
-            0, 0               # Osc2 wave, detune
+            0, 0,              # Osc2 wave, detune
+            0, 150, 150, 200   # F_attack, F_decay, F_sustain, F_release
         ])
         self.keyon = 0
         self.pre_keyon = 0

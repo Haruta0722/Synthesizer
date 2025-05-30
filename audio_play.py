@@ -15,7 +15,12 @@ def audioplay(state):
 
     while stream.is_active() and state.playing:
         buf, pos = synthesize(state, pos, x)
-        buf = (buf * 32768.0).astype(np.int16)
+        
+        # NaN・inf 対策 + 範囲クリップ
+        buf = np.nan_to_num(buf)                # NaN→0、inf→大きな数に
+        buf = np.clip(buf, -1.0, 1.0)           # [-1.0, 1.0]に収める
+        buf = (buf * 32767.0).astype(np.int16)  # int16範囲に変換
+        
         stream.write(struct.pack("h" * len(buf), *buf))
 
     stream.stop_stream()
