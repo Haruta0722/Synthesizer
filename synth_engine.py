@@ -3,16 +3,18 @@ from filter import lowpass
 import numpy as np
 
 def synthesize(state, pos, x):
+    
     sl = state.sl
     pitch = state.pitch
     keyon = state.keyon
-    velocity = state.velosity
+    velosity = state.velosity
     bufsize = state.bufsize
     RATE = state.rate
 
+
     wave_total = np.zeros_like(x, dtype=np.float32)
 
-    # === Oscillator 1 (Unison対応) ===
+    # === Oscillator 1 (with unison) ===
     unison_count = max(1, sl[6])
     detune_amt = sl[7] / 1000.0
     for i in range(unison_count):
@@ -36,64 +38,55 @@ def synthesize(state, pos, x):
     )
     wave_total += osc2.generate(pitch, pos, x)
 
-    wave_total /= 2.0  # 合成後にスケーリング
+    wave_total /= 2.0  # 平均化
 
-    # === Envelope Parameter ===
-    f_attack = max(sl[10] / 1000.0, 0.001)
-    f_decay = max(sl[11] / 1000.0, 0.001)
-    f_sustain = max(min(sl[12] / 255.0, 1.0), 0.0)
-    f_release = max(sl[13] / 1000.0, 0.001)
+    # === エンベロープ処理 ===
+    pos += bufsize
+    atk = (sl[1] / 1000)**3 + 0.00001
+    rel = (sl[2] / 1000)**3 + 0.00001
 
-    # === Envelope Value Buffer ===
-    vels = np.zeros_like(x, dtype=np.float32)
+    # 状態遷移処理
+    if keyon == 1 and state.pre_keyon == 0:
+        state.env_phase = "attack"
+    elif keyon == 0 and state.pre_keyon == 1:
+        state.env_phase = "release"
 
-    if keyon == 1:
-        vels = velocity + x * ((sl[1] / 1000.0)**3 + 0.00001)
-        vels = np.clip(vels, 0.0, 0.6)
-        if state.filter_env_phase in ('idle', 'release'):
-            state.filter_env_phase = 'attack'
-            state.filter_env_pos = 0.0
-    else:
-        vels = velocity - x * ((sl[2] / 1000.0)**3 + 0.00001)
-        vels = np.clip(vels, 0.0, 0.6)
-        if state.filter_env_phase != 'idle':
-            state.filter_env_phase = 'release'
+    # エンベロープ生成
+    if state.env_phase == "attack":
+        vels = state.velosity + x * atk
+        vels[vels > 0.6] = 0.6
+        if vels[-1] >= 0.6:
+            state.env_phase = "sustain"
 
-    # === Filter Envelope Step ===
-    step = 1.0 / (RATE / bufsize)
-    if state.filter_env_phase == 'attack':
-        state.filter_env_val += step / f_attack
-        if state.filter_env_val >= 1.0:
-            state.filter_env_val = 1.0
-            state.filter_env_phase = 'decay'
-    elif state.filter_env_phase == 'decay':
-        state.filter_env_val -= step * (1.0 - f_sustain) / f_decay
-        if state.filter_env_val <= f_sustain:
-            state.filter_env_val = f_sustain
-            state.filter_env_phase = 'sustain'
-    elif state.filter_env_phase == 'release':
-        state.filter_env_val -= step * f_sustain / f_release
-        if state.filter_env_val <= 0.0:
-            state.filter_env_val = 0.0
-            state.filter_env_phase = 'idle'
+    elif state.env_phase == "sustain":
+        if keyon == 0:
+            state.env_phase = "release"  # ←★重要: key離した瞬間にreleaseへ
+            vels = state.velosity - x * rel
+        else:
+            vels = np.ones_like(x) * state.velosity
 
-    # === Apply Envelope to Oscillator Output ===
-    signal = wave_total * vels
-    signal = np.clip(signal, -1.0, 1.0)  # clip前処理
+    elif state.env_phase == "release":
+        vels = state.velosity - x * rel
+        vels[vels < 0.0] = 0.0
+        if vels[-1] <= 0.0:
+            state.env_phase = "off"
 
-    # === Filter ===
-    if not hasattr(state, "lpfbuf"):
-        state.lpfbuf = [0.0, 0.0, 0.0, 0.0]
-        state.outwave = np.zeros(bufsize, dtype=np.float32)
+    else:  # env_phase == "off"
+        vels = np.zeros_like(x)
 
-    base_cutoff = sl[3] / 255.0
-    mod_cutoff = base_cutoff + state.filter_env_val * (1.0 - base_cutoff)
-    cutoff_freq = np.clip(mod_cutoff, 0.0, 1.0) * (RATE / 2)
+    # 状態更新
+    state.velosity = vels[-1]
+    state.pre_keyon = keyon
 
+    wave_total *= vels #フィルター適用
+
+    # === Lowpass Filter ===
+    # スライダー値取得
+    cutoff_val = sl[3]
+
+    # フィルター適用
     filtered, state.lpfbuf = lowpass(
-        signal, cutoff_freq, RATE, bufsize, state.lpfbuf, state.outwave
+        wave_total, cutoff_val, RATE, bufsize, state.lpfbuf, state.outwave
     )
 
-    state.velosity = float(vels[-1])
-    pos += bufsize
     return filtered, pos
