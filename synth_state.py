@@ -7,7 +7,8 @@ class SynthState:
             0, 150, 150, 200,  # wave, attack, release, LPF_cutoff
             0, 0,              # FM_amp, FM_freq
             1, 0,              # Unison, Detune
-            0, 0               # Osc2 wave, detune
+            0, 0,              # Osc2 wave, detune
+            255, 100, 100      # ← FilterEnvAmt, FilterEnvAtk, FilterEnvRel
         ])
         self.keyon = 0
         self.pre_keyon = 0
@@ -22,3 +23,5 @@ class SynthState:
 
         # 追加: エンベロープフェーズ管理
         self.env_phase = "off"  # "attack", "release", "off"
+        self.fenv_value = 0.0  # フィルターエンベロープの現在値
+        self.fenv_curve = np.zeros(self.bufsize, dtype=np.float32)  # ← フィルターエンベロープの1フレーム分を保存

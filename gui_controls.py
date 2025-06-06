@@ -5,7 +5,8 @@ import cv2
 slName = np.array([
     'Wave_type1', 'Attack', 'Release', 'Lowpass_freq',
     'FM_amp1', 'FM_freq1', 'Unison1', 'Detune1',
-    'Wave_type2', 'Detune2'
+    'Wave_type2', 'Detune2',
+    'FilterEnvAmt', 'FilterEnvAtk', 'FilterEnvRel'  # ←追加
 ])
 
 # 鍵盤のサイズ
@@ -52,6 +53,8 @@ def setup_gui_and_keyboard(state):
             max_val = 8
         elif slName[i] == 'Detune1' or slName[i] == 'Detune2':
             max_val = 100
+        #elif slName[i] == 'FilterEnvAmt':
+            #max_val = 1
         else:
             max_val = 255
 
@@ -62,6 +65,7 @@ def setup_gui_and_keyboard(state):
     # マウスイベント登録
     def mouse_event(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
+            print("Mouse click detected!")  # ← デバッグ
             state.keyon = 1
             if y >= ksy / 2:
                 note = lowkeys[int(15.0 * x / ksx)]
@@ -77,3 +81,46 @@ def setup_gui_and_keyboard(state):
     cv2.setMouseCallback("keyboard", mouse_event)
 
     return keyboard
+
+def draw_filter_env(state):
+    width = 400
+    height = 200
+    img = np.ones((height, width, 3), dtype=np.uint8) * 255
+
+    # エンベロープ値
+    fenv = state.fenv_curve
+    if len(fenv) == 0:
+        return
+
+    # エンベロープを青線で描画
+    xs = np.linspace(0, width - 1, len(fenv)).astype(int)
+    ys_fenv = (1.0 - fenv) * (height - 1)  # 上が1.0、下が0.0になるように
+
+    for i in range(len(fenv) - 1):
+        pt1 = (xs[i], int(ys_fenv[i]))
+        pt2 = (xs[i+1], int(ys_fenv[i+1]))
+        cv2.line(img, pt1, pt2, (255, 0, 0), 2)  # 青線
+
+    # --- カットオフ推移をオーバーレイ ---
+    # fenv から実際のカットオフ値を計算（スライダー値と係数反映）
+    base_cutoff = state.sl[3]
+    fenv_amt = state.sl[10] / 255.0
+    cutoff_vals = np.clip(base_cutoff + fenv * fenv_amt * 255, 0, 255)
+
+    # スケーリング：cutoff_slider_val → Hz → log表示
+    freqs = 200 + (cutoff_vals / 255.0)**2 * 20000
+    log_freqs = np.log10(freqs)
+    min_log = np.log10(200)
+    max_log = np.log10(20200)
+    ys_cutoff = (1.0 - (log_freqs - min_log) / (max_log - min_log)) * (height - 1)
+
+    for i in range(len(ys_cutoff) - 1):
+        pt1 = (xs[i], int(ys_cutoff[i]))
+        pt2 = (xs[i+1], int(ys_cutoff[i+1]))
+        cv2.line(img, pt1, pt2, (0, 0, 255), 2)  # 赤線
+
+    # 凡例追加（オプション）
+    cv2.putText(img, "Filter Env (Blue)", (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0), 1)
+    cv2.putText(img, "Cutoff Freq (Red)", (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
+
+    cv2.imshow("Filter Envelope", img)
